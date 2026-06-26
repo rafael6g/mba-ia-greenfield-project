@@ -37,6 +37,15 @@ describe('Database migrations (integration)', () => {
       ),
       dataSource.query(`DROP TABLE IF EXISTS "migrations" CASCADE`),
     ]);
+
+    // Suites that build the schema via `synchronize` (e.g. the auth
+    // integration suite) leave the enum type behind: DROP TABLE does not
+    // remove a Postgres TYPE. If this suite runs after them, the migration's
+    // CREATE TYPE then fails with "already exists". Dropping it here keeps the
+    // suite order-independent on a shared database.
+    await dataSource.query(
+      `DROP TYPE IF EXISTS "public"."verification_tokens_type_enum" CASCADE`,
+    );
   });
 
   afterAll(async () => {
