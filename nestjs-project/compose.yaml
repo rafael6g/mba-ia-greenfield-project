@@ -1,6 +1,6 @@
 services:
   nestjs-api:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile.dev
     ports:
@@ -12,6 +12,27 @@ services:
         condition: service_healthy
       mailpit:
         condition: service_started
+      redis:
+        condition: service_healthy
+      createbuckets:
+        condition: service_completed_successfully
+
+  video-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    # Placeholder until SI-03.7 builds the worker entrypoint; then switch to:
+    #   command: npm run start:worker:dev
+    command: tail -f /dev/null
+    volumes:
+      - .:/home/node/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      createbuckets:
+        condition: service_completed_successfully
 
   db:
     image: postgres:17
@@ -33,4 +54,43 @@ services:
       - "1025:1025"
       - "8025:8025"
 
+  redis:
+    image: redis:7
+    # No host port mapping — the API/worker reach Redis via the Compose network
+    # (redis:6379). Avoids conflicts with a Redis already bound on the host's 6379.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=streamtube
+      - MINIO_ROOT_PASSWORD=streamtube
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  # One-shot job: waits for MinIO, creates the videos bucket (idempotent).
+  # API/worker depend on this completing, which also gates MinIO readiness.
+  createbuckets:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 streamtube streamtube; do
+        echo 'waiting for minio...'; sleep 2;
+      done;
+      mc mb --ignore-existing local/streamtube-videos;
+      exit 0;
+      "
+
+volumes:
+  minio-data:
