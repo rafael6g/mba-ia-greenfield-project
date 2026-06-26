@@ -45,6 +45,7 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (BullMQ + Redis)** — pela aderência direta ao critério de aceite do desafio ("fila real subindo no Compose") e ao diagrama C4 (Message Queue como container dedicado), além de ser o padrão NestJS com worker em processo separado e retry/backoff prontos. **Trade-off honesto:** se minimizar infraestrutura fosse a prioridade, **pg-boss (B)** seria tecnicamente superior para este projeto (sem Redis, enfileiramento transacional atômico com o rascunho, dead-letter nativo) — é uma alternativa plenamente válida e recomendada como segunda opção. RabbitMQ (C) é overkill para um único tipo de job.
 
 **Decision:** **Option A — BullMQ + Redis.** Escolhido pela aderência inequívoca ao critério de aceite ("fila real subindo no Compose") e ao diagrama C4 (Message Queue como container dedicado), além de ser o padrão NestJS (worker em processo separado, retry/backoff, `@nestjs/bullmq`). O custo de adicionar Redis é justificado pelo requisito do desafio; pg-boss fica registrado como alternativa técnica forte caso minimizar infraestrutura passe a ser prioridade.
+**Libraries:** bullmq, @nestjs/bullmq
 
 ---
 
@@ -143,6 +144,7 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (`@aws-sdk/client-s3` v3)** — é o caminho com paridade total MinIO↔S3 (o projeto declara "trocaria por S3 em produção"), com presigner e multipart oficiais e tipagem forte, sem amarrar a implementação ao MinIO. `minio-js` e `s3-lite-client` funcionam, mas comprometem a transparência da troca para S3.
 
 **Decision:** **Option A** — conforme recomendação.
+**Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner, @aws-sdk/lib-storage
 
 ---
 
@@ -206,6 +208,7 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (container worker dedicado + `ffprobe`/`ffmpeg`)** — isola a carga pesada da API, escala de forma independente e atende diretamente o critério "worker real subindo no Compose" e o diagrama C4. Quanto ao **wrapper**, `fluent-ffmpeg` tende a ser preferível pela ergonomia de montar comandos e extrair metadados, mas `child_process` direto (C) é aceitável — esse detalhe de implementação fica para o `implement`, guiado pelas best-practices. Worker in-process (B) está descartado por acoplar CPU pesada à API.
 
 **Decision:** **Option A** — conforme recomendação.
+**Libraries:** fluent-ffmpeg, @types/fluent-ffmpeg
 
 ---
 
@@ -269,6 +272,7 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (`nanoid`)** — entrega o identificador público curto e opaco que a URL única pede, com índice único na coluna `public_id` (+ retry em colisão improvável), sem expor a PK. UUID (B) serve mas degrada a URL; `hashids` (C) pressupõe IDs sequenciais que o projeto não usa.
 
 **Decision:** **Option A** — conforme recomendação.
+**Libraries:** nanoid
 
 ---
 
