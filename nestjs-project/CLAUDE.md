@@ -34,6 +34,11 @@ docker compose exec nestjs-api npm run start:dev
 Services:
 - `nestjs-api` — NestJS API, port `3000`
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
+- `mailpit` — SMTP capture, SMTP `1025`, UI `8025`
+- `minio` — S3-compatible object storage, API `9000`, console `9001`, user/password `streamtube`
+- `createbuckets` — one-shot job that creates the `streamtube-videos` bucket
+- `redis` — BullMQ broker (no host port; reached as `redis:6379` on the Compose network)
+- `video-worker` — runs `npm run start:worker:dev` (FFmpeg in the image), consumes the `video-processing` queue. ⚠️ The initial `nest --watch` compile is slow over the Windows bind mount and file-watching can miss changes — after editing worker code, `docker compose restart video-worker`.
 
 All verification and teardown commands run on the **host machine**:
 
@@ -60,6 +65,8 @@ docker compose down
 
 ```bash
 npm run start:dev                        # Dev server with hot-reload
+npm run start:worker:dev                 # Video worker (watch) — runs in the video-worker container
+npm run start:worker:prod                # Video worker (compiled) — node dist/worker.main
 npm run build                            # Compile to dist/
 npm run start:prod                       # Run compiled build
 
