@@ -21,9 +21,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    # Placeholder until SI-03.7 builds the worker entrypoint; then switch to:
-    #   command: npm run start:worker:dev
-    command: tail -f /dev/null
+    command: npm run start:worker:dev
     volumes:
       - .:/home/node/app
     depends_on:

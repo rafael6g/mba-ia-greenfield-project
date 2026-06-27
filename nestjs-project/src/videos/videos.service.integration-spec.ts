@@ -146,9 +146,18 @@ describe('VideosService (integration)', () => {
     expect(row.upload_id).toBeNull();
     expect(Number(row.size_bytes)).toBeGreaterThan(0);
 
-    const jobs = await queue.getJobs(['waiting', 'delayed', 'active']);
-    expect(jobs).toHaveLength(1);
-    expect(jobs[0].name).toBe(PROCESS_VIDEO_JOB);
-    expect(jobs[0].data).toEqual({ videoId: init.id });
+    // Robust to a running worker consumer: the job may be waiting, in-flight,
+    // or already failed-and-retained (fake payload → ffprobe fails). Any of
+    // these proves it was enqueued with the right name and payload.
+    const jobs = await queue.getJobs([
+      'waiting',
+      'delayed',
+      'active',
+      'prioritized',
+      'failed',
+    ]);
+    const job = jobs.find((j) => j.data?.videoId === init.id);
+    expect(job).toBeDefined();
+    expect(job?.name).toBe(PROCESS_VIDEO_JOB);
   });
 });
