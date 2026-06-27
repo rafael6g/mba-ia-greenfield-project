@@ -32,9 +32,12 @@ describe('VideosModule', () => {
     }).compile();
 
     expect(module).toBeDefined();
-    // Wait for the BullMQ connection to finish initializing before teardown so
-    // it does not leak a "Connection is closed" error into a later suite.
-    await module.get<Queue>(getQueueToken('video-processing')).waitUntilReady();
+    // Handle BullMQ connection 'error' and wait for readiness before teardown so
+    // a stray "Connection is closed" is not reported as an unhandled error in a
+    // later suite (shared --runInBand process).
+    const queue = module.get<Queue>(getQueueToken('video-processing'));
+    queue.on('error', () => undefined);
+    await queue.waitUntilReady();
     await module.close();
   }, 30000);
 });

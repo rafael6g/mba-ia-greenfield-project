@@ -57,6 +57,7 @@ describe('Videos (e2e)', () => {
     throttlerStorage =
       moduleFixture.get<ThrottlerStorageService>(ThrottlerStorage);
     queue = moduleFixture.get<Queue>(getQueueToken(VIDEO_QUEUE));
+    queue.on('error', () => undefined);
     await queue.waitUntilReady();
   });
 

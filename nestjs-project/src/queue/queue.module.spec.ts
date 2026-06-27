@@ -16,12 +16,13 @@ describe('QueueModule', () => {
     }).compile();
 
     const queue = moduleRef.get<Queue>(getQueueToken(VIDEO_QUEUE));
+    // Handle BullMQ connection 'error' events so a stray "Connection is closed"
+    // on teardown is not reported as an unhandled error in a later suite
+    // (shared --runInBand process).
+    queue.on('error', () => undefined);
     expect(queue).toBeInstanceOf(Queue);
     expect(queue.name).toBe(VIDEO_QUEUE);
 
-    // Let the Redis connection finish initializing before tearing down, so its
-    // init() does not reject with "Connection is closed" and leak a stray
-    // unhandled error into a later suite (shared --runInBand process).
     await queue.waitUntilReady();
     await moduleRef.close();
   }, 30000);

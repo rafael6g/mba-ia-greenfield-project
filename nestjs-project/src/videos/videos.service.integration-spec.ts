@@ -52,6 +52,7 @@ describe('VideosService (integration)', () => {
     queue = moduleRef.get<Queue<ProcessVideoJobData>>(
       getQueueToken(VIDEO_QUEUE),
     );
+    queue.on('error', () => undefined);
     await queue.waitUntilReady();
   });
 
