@@ -20,6 +20,7 @@ import {
   UnsupportedMediaTypeException,
   UploadTooLargeException,
   VideoNotFoundException,
+  VideoNotReadyException,
 } from './exceptions/video.exceptions';
 import { generatePublicId } from './public-id.util';
 
@@ -34,6 +35,15 @@ export interface InitiateUploadResult {
   key: string;
   partSize: number;
   parts: SignedPart[];
+}
+
+export interface PublicVideoView {
+  publicId: string;
+  title: string;
+  status: VideoStatus;
+  duration: number | null;
+  thumbnailUrl: string | null;
+  createdAt: Date;
 }
 
 function isPublicIdUniqueViolation(err: unknown): boolean {
@@ -139,6 +149,55 @@ export class VideosService {
     await this.videoQueue.add(PROCESS_VIDEO_JOB, { videoId: video.id });
 
     return { id: video.id, status: video.status };
+  }
+
+  async getStreamRedirect(publicId: string): Promise<string> {
+    const video = await this.getReadyVideo(publicId);
+    return this.storageService.getPresignedDownloadUrl(video.storage_key, {});
+  }
+
+  async getDownloadRedirect(publicId: string): Promise<string> {
+    const video = await this.getReadyVideo(publicId);
+    const attachmentFilename =
+      video.original_filename ?? `${video.public_id}.mp4`;
+    return this.storageService.getPresignedDownloadUrl(video.storage_key, {
+      attachmentFilename,
+    });
+  }
+
+  async getPublicVideo(publicId: string): Promise<PublicVideoView> {
+    const video = await this.videoRepository.findOne({
+      where: { public_id: publicId },
+    });
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+
+    const thumbnailUrl = video.thumbnail_key
+      ? await this.storageService.getPresignedDownloadUrl(video.thumbnail_key)
+      : null;
+
+    return {
+      publicId: video.public_id,
+      title: video.title,
+      status: video.status,
+      duration: video.duration,
+      thumbnailUrl,
+      createdAt: video.created_at,
+    };
+  }
+
+  private async getReadyVideo(publicId: string): Promise<Video> {
+    const video = await this.videoRepository.findOne({
+      where: { public_id: publicId },
+    });
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+    if (video.status !== VideoStatus.READY) {
+      throw new VideoNotReadyException();
+    }
+    return video;
   }
 
   /**

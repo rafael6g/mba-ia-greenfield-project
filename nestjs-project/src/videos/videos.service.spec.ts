@@ -14,6 +14,7 @@ import {
   UnsupportedMediaTypeException,
   UploadTooLargeException,
   VideoNotFoundException,
+  VideoNotReadyException,
 } from './exceptions/video.exceptions';
 import { VideosService } from './videos.service';
 
@@ -57,6 +58,7 @@ interface Mocks {
     abortMultipartUpload: jest.Mock;
     completeMultipartUpload: jest.Mock;
     headObject: jest.Mock;
+    getPresignedDownloadUrl: jest.Mock;
   };
   channels: { findByUserId: jest.Mock };
   queue: { add: jest.Mock };
@@ -83,6 +85,9 @@ function build(
       abortMultipartUpload: jest.fn().mockResolvedValue(undefined),
       completeMultipartUpload: jest.fn().mockResolvedValue(undefined),
       headObject: jest.fn().mockResolvedValue({ contentLength: 2048 }),
+      getPresignedDownloadUrl: jest
+        .fn()
+        .mockResolvedValue('https://minio/presigned-get'),
     },
     channels: { findByUserId: jest.fn().mockResolvedValue(makeChannel()) },
     queue: { add: jest.fn().mockResolvedValue(undefined) },
@@ -104,9 +109,14 @@ function makeDraftVideo(): Video {
   v.id = 'video-uuid';
   v.public_id = 'pub_id_1234';
   v.channel_id = 'channel-uuid';
+  v.title = 'My Video';
   v.status = VideoStatus.DRAFT;
   v.storage_key = 'videos/pub_id_1234/source';
   v.upload_id = 'upload-id';
+  v.duration = null;
+  v.thumbnail_key = null;
+  v.original_filename = null;
+  v.created_at = new Date('2026-01-01T00:00:00Z');
   return v;
 }
 
@@ -261,6 +271,128 @@ describe('VideosService', () => {
       await expect(
         service.completeUpload('user-id', video.id, { parts }),
       ).rejects.toBeInstanceOf(InvalidUploadStateException);
+    });
+  });
+
+  describe('getStreamRedirect', () => {
+    function readyVideo(): Video {
+      const v = makeDraftVideo();
+      v.status = VideoStatus.READY;
+      return v;
+    }
+
+    it('returns a presigned URL for a ready video', async () => {
+      const video = readyVideo();
+      const { service, mocks } = build();
+      mocks.repo.findOne.mockResolvedValue(video);
+
+      const url = await service.getStreamRedirect(video.public_id);
+
+      expect(url).toBe('https://minio/presigned-get');
+      expect(mocks.storage.getPresignedDownloadUrl).toHaveBeenCalledWith(
+        video.storage_key,
+        {},
+      );
+    });
+
+    it('throws VideoNotFoundException for an unknown publicId', async () => {
+      const { service, mocks } = build();
+      mocks.repo.findOne.mockResolvedValue(null);
+
+      await expect(service.getStreamRedirect('nope')).rejects.toBeInstanceOf(
+        VideoNotFoundException,
+      );
+    });
+
+    it('throws VideoNotReadyException when the video is not ready', async () => {
+      const video = makeDraftVideo();
+      video.status = VideoStatus.PROCESSING;
+      const { service, mocks } = build();
+      mocks.repo.findOne.mockResolvedValue(video);
+
+      await expect(
+        service.getStreamRedirect(video.public_id),
+      ).rejects.toBeInstanceOf(VideoNotReadyException);
+    });
+  });
+
+  describe('getDownloadRedirect', () => {
+    it('passes the attachment filename to the presigned URL', async () => {
+      const video = makeDraftVideo();
+      video.status = VideoStatus.READY;
+      video.original_filename = 'my-clip.mp4';
+      const { service, mocks } = build();
+      mocks.repo.findOne.mockResolvedValue(video);
+
+      await service.getDownloadRedirect(video.public_id);
+
+      expect(mocks.storage.getPresignedDownloadUrl).toHaveBeenCalledWith(
+        video.storage_key,
+        { attachmentFilename: 'my-clip.mp4' },
+      );
+    });
+
+    it('falls back to {publicId}.mp4 when no original filename', async () => {
+      const video = makeDraftVideo();
+      video.status = VideoStatus.READY;
+      video.original_filename = null;
+      const { service, mocks } = build();
+      mocks.repo.findOne.mockResolvedValue(video);
+
+      await service.getDownloadRedirect(video.public_id);
+
+      expect(mocks.storage.getPresignedDownloadUrl).toHaveBeenCalledWith(
+        video.storage_key,
+        { attachmentFilename: `${video.public_id}.mp4` },
+      );
+    });
+  });
+
+  describe('getPublicVideo', () => {
+    it('returns the view with a null thumbnailUrl before processing', async () => {
+      const video = makeDraftVideo();
+      video.thumbnail_key = null;
+      video.created_at = new Date('2026-01-01T00:00:00Z');
+      const { service, mocks } = build();
+      mocks.repo.findOne.mockResolvedValue(video);
+
+      const view = await service.getPublicVideo(video.public_id);
+
+      expect(view).toEqual({
+        publicId: video.public_id,
+        title: video.title,
+        status: VideoStatus.DRAFT,
+        duration: null,
+        thumbnailUrl: null,
+        createdAt: video.created_at,
+      });
+      expect(mocks.storage.getPresignedDownloadUrl).not.toHaveBeenCalled();
+    });
+
+    it('returns a presigned thumbnailUrl once processed', async () => {
+      const video = makeDraftVideo();
+      video.status = VideoStatus.READY;
+      video.thumbnail_key = 'videos/pub_id_1234/thumbnail.jpg';
+      video.duration = 30;
+      const { service, mocks } = build();
+      mocks.repo.findOne.mockResolvedValue(video);
+
+      const view = await service.getPublicVideo(video.public_id);
+
+      expect(view.thumbnailUrl).toBe('https://minio/presigned-get');
+      expect(view.duration).toBe(30);
+      expect(mocks.storage.getPresignedDownloadUrl).toHaveBeenCalledWith(
+        video.thumbnail_key,
+      );
+    });
+
+    it('throws VideoNotFoundException for an unknown publicId', async () => {
+      const { service, mocks } = build();
+      mocks.repo.findOne.mockResolvedValue(null);
+
+      await expect(service.getPublicVideo('nope')).rejects.toBeInstanceOf(
+        VideoNotFoundException,
+      );
     });
   });
 });

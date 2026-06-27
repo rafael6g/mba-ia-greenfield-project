@@ -13,6 +13,7 @@ import { ValidationExceptionFilter } from '../src/common/filters/validation-exce
 import { MailService } from '../src/mail/mail.service';
 import { VIDEO_QUEUE } from '../src/queue/queue.constants';
 import { cleanAllTables } from '../src/test/create-test-data-source';
+import { Video, VideoStatus } from '../src/videos/entities/video.entity';
 
 interface InitiateResponse {
   id: string;
@@ -128,6 +129,20 @@ describe('Videos (e2e)', () => {
     return { id: body.id, parts };
   }
 
+  async function completeAndMarkReady(accessToken: string): Promise<string> {
+    const { id, parts } = await initiateAndUpload(accessToken);
+    await request(app.getHttpServer())
+      .post(`/videos/${id}/complete`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ parts });
+    // The worker runs async; force `ready` deterministically for the test.
+    const repo = dataSource.getRepository(Video);
+    const video = await repo.findOneByOrFail({ id });
+    video.status = VideoStatus.READY;
+    await repo.save(video);
+    return video.public_id;
+  }
+
   describe('POST /videos', () => {
     it('returns 201 with the draft id, publicId, uploadId and presigned parts', async () => {
       const accessToken = await registerConfirmAndLogin();
@@ -239,6 +254,95 @@ describe('Videos (e2e)', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .send({ parts })
         .expect(409);
+    });
+  });
+
+  describe('GET /videos/:publicId/stream', () => {
+    it('redirects (302) to a presigned URL that serves Range/206 — anonymous', async () => {
+      const accessToken = await registerConfirmAndLogin();
+      const publicId = await completeAndMarkReady(accessToken);
+
+      const res = await request(app.getHttpServer())
+        .get(`/videos/${publicId}/stream`)
+        .expect(302);
+
+      const location = res.headers['location'];
+      expect(location).toContain('http');
+
+      // The presigned URL, fetched with a Range header, is served by storage
+      // with 206 Partial Content — streaming without a full download.
+      const ranged = await fetch(location, { headers: { Range: 'bytes=0-3' } });
+      expect(ranged.status).toBe(206);
+    });
+
+    it('returns 404 for an unknown publicId', async () => {
+      await request(app.getHttpServer())
+        .get('/videos/unknownid01/stream')
+        .expect(404);
+    });
+
+    it('returns 409 when the video is not ready', async () => {
+      const accessToken = await registerConfirmAndLogin();
+      const { id, parts } = await initiateAndUpload(accessToken);
+      await request(app.getHttpServer())
+        .post(`/videos/${id}/complete`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ parts });
+      const publicId = (
+        await dataSource.getRepository(Video).findOneByOrFail({ id })
+      ).public_id;
+
+      await request(app.getHttpServer())
+        .get(`/videos/${publicId}/stream`)
+        .expect(409);
+    });
+  });
+
+  describe('GET /videos/:publicId/download', () => {
+    it('redirects (302) to a presigned URL with attachment disposition', async () => {
+      const accessToken = await registerConfirmAndLogin();
+      const publicId = await completeAndMarkReady(accessToken);
+
+      const res = await request(app.getHttpServer())
+        .get(`/videos/${publicId}/download`)
+        .expect(302);
+
+      const location = res.headers['location'];
+      expect(location).toContain('response-content-disposition');
+    });
+  });
+
+  describe('GET /videos/:publicId', () => {
+    it('exposes the status transition draft → processing — anonymous', async () => {
+      const accessToken = await registerConfirmAndLogin();
+      const { id, parts } = await initiateAndUpload(accessToken);
+      const publicId = (
+        await dataSource.getRepository(Video).findOneByOrFail({ id })
+      ).public_id;
+
+      const draftRes = await request(app.getHttpServer())
+        .get(`/videos/${publicId}`)
+        .expect(200);
+      expect(draftRes.body as { status: string }).toMatchObject({
+        publicId,
+        status: 'draft',
+      });
+
+      await request(app.getHttpServer())
+        .post(`/videos/${id}/complete`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ parts });
+
+      const processingRes = await request(app.getHttpServer())
+        .get(`/videos/${publicId}`)
+        .expect(200);
+      expect(processingRes.body as { status: string }).toMatchObject({
+        status: 'processing',
+      });
+    });
+
+    it('returns 404 for an unknown publicId', async () => {
+      await request(app.getHttpServer()).get('/videos/unknownid01').expect(404);
     });
   });
 });
