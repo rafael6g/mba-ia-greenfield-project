@@ -23,8 +23,31 @@ See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 - **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
 - **Database** (PostgreSQL) → users, channels, videos, comments, likes
 - **Object Storage** (S3/MinIO) → video files and thumbnails
-- **Message Queue** (TBD) → video processing job queue
+- **Message Queue** (Redis + BullMQ — decided in Phase 03) → video processing job queue
 - **Email Service** (SMTP) → account confirmation and password recovery
+
+## Videos (Phase 03)
+
+The `videos` module (`nestjs-project/src/videos/`) implements large-file upload, asynchronous processing, streaming and download. Decisions are in `docs/decisions/technical-decisions-phase-03-videos.md`; the plan in `docs/phases/phase-03-videos/`.
+
+**Module layout:**
+- `videos/entities/video.entity.ts` — `Video` (table `videos`), FK to `channels`, `status` enum `video_status` (`draft`→`processing`→`ready`/`failed`), unique `public_id` (nanoid 11 chars), `storage_key`/`thumbnail_key`/`upload_id`/`duration`/`metadata` (jsonb)/`size_bytes`/`error_reason`.
+- `videos/videos.service.ts` + `videos.controller.ts` — upload lifecycle, streaming/download redirects, public metadata.
+- `videos/dto/` — `InitiateUploadDto`, `CompleteUploadDto`. `videos/exceptions/video.exceptions.ts` — domain exceptions mapped by the inherited filter.
+- `storage/storage.service.ts` — S3/MinIO wrapper (multipart, presigned GET/PUT, HeadObject, putObject).
+- `queue/` — BullMQ `video-processing` queue (`QueueModule`, constants, job payload).
+- `worker/` + `worker.main.ts` — standalone Nest context (the `video-worker` container) hosting `VideoProcessingProcessor`/`VideoProcessingService` (ffprobe metadata + ffmpeg thumbnail).
+
+**Endpoints** (`@ApiTags('videos')`):
+- `POST /videos` (auth) — pre-registers a `draft` on the caller's channel, opens a presigned **multipart** upload (up to 10GB) and returns one presigned URL per part. Bytes never pass through the API.
+- `POST /videos/:id/complete` (auth, owner) — finalizes the multipart, validates via `HeadObject`, flips to `processing`, enqueues `process-video`.
+- `GET /videos/:publicId/stream` (public) — 302 redirect to a presigned GET URL; storage serves HTTP `Range`/`206`.
+- `GET /videos/:publicId/download` (public) — 302 redirect to a presigned GET URL with `Content-Disposition: attachment`.
+- `GET /videos/:publicId` (public) — status/title/duration/thumbnailUrl resource for polling.
+
+**Flow:** API signs upload → client PUTs parts to MinIO → complete enqueues a BullMQ job → `video-worker` consumes it, extracts duration/metadata (ffprobe) and a thumbnail frame (ffmpeg), uploads the thumbnail and sets `ready`; terminal failure (after retries) sets `failed` + `error_reason` and retains the job (dead-letter).
+
+**Infra (compose):** `minio` (object storage), `createbuckets` (creates `streamtube-videos`), `redis` (BullMQ broker), `video-worker` (`npm run start:worker:dev`, FFmpeg in the image). All hosts use Compose service names. Worker scripts: `start:worker:dev` / `start:worker:prod`.
 
 ## Docker Networking
 
