@@ -14,6 +14,7 @@ import {
   cleanAllTables,
   createTestDataSource,
 } from '../test/create-test-data-source';
+import type { ProcessVideoJobData } from '../queue/process-video.job';
 import { PROCESS_VIDEO_JOB, VIDEO_QUEUE } from '../queue/queue.constants';
 import { User } from '../users/entities/user.entity';
 import { Video, VideoStatus } from './entities/video.entity';
@@ -27,7 +28,7 @@ describe('VideosService (integration)', () => {
   let moduleRef: Awaited<ReturnType<typeof buildModule>>;
   let service: VideosService;
   let dataSource: DataSource;
-  let queue: Queue;
+  let queue: Queue<ProcessVideoJobData>;
 
   async function buildModule() {
     return Test.createTestingModule({
@@ -48,7 +49,10 @@ describe('VideosService (integration)', () => {
     moduleRef = await buildModule();
     service = moduleRef.get(VideosService);
     dataSource = moduleRef.get(DataSource);
-    queue = moduleRef.get<Queue>(getQueueToken(VIDEO_QUEUE));
+    queue = moduleRef.get<Queue<ProcessVideoJobData>>(
+      getQueueToken(VIDEO_QUEUE),
+    );
+    await queue.waitUntilReady();
   });
 
   afterAll(async () => {
@@ -156,7 +160,7 @@ describe('VideosService (integration)', () => {
       'prioritized',
       'failed',
     ]);
-    const job = jobs.find((j) => j.data?.videoId === init.id);
+    const job = jobs.find((j) => j.data.videoId === init.id);
     expect(job).toBeDefined();
     expect(job?.name).toBe(PROCESS_VIDEO_JOB);
   });

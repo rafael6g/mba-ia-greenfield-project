@@ -1,6 +1,8 @@
+import { getQueueToken } from '@nestjs/bullmq';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { Queue } from 'bullmq';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { Channel } from '../channels/entities/channel.entity';
@@ -30,6 +32,9 @@ describe('VideosModule', () => {
     }).compile();
 
     expect(module).toBeDefined();
+    // Wait for the BullMQ connection to finish initializing before teardown so
+    // it does not leak a "Connection is closed" error into a later suite.
+    await module.get<Queue>(getQueueToken('video-processing')).waitUntilReady();
     await module.close();
   }, 30000);
 });

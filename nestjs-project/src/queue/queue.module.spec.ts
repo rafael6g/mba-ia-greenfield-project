@@ -19,6 +19,10 @@ describe('QueueModule', () => {
     expect(queue).toBeInstanceOf(Queue);
     expect(queue.name).toBe(VIDEO_QUEUE);
 
+    // Let the Redis connection finish initializing before tearing down, so its
+    // init() does not reject with "Connection is closed" and leak a stray
+    // unhandled error into a later suite (shared --runInBand process).
+    await queue.waitUntilReady();
     await moduleRef.close();
   }, 30000);
 });

@@ -105,7 +105,9 @@ export class VideoProcessingService {
     const url = await this.storageService.getPresignedDownloadUrl(key);
     const res = await fetch(url);
     if (!res.ok || !res.body) {
-      throw new Error(`Failed to download source object (status ${res.status})`);
+      throw new Error(
+        `Failed to download source object (status ${res.status})`,
+      );
     }
     await pipeline(
       Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]),

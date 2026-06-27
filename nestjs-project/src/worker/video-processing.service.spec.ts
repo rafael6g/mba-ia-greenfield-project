@@ -12,25 +12,26 @@ const ffmpegState: {
 } = { handlers: {}, probeData: undefined };
 
 jest.mock('fluent-ffmpeg', () => {
-  const command = {
+  const command: { on: jest.Mock; screenshots: jest.Mock } = {
     on: jest.fn((event: string, cb: (...args: unknown[]) => void) => {
       ffmpegState.handlers[event] = cb;
       return command;
     }),
-    screenshots: jest.fn(() => {
+    screenshots: jest.fn((): void => {
       // Simulate ffmpeg finishing the screenshot job.
       ffmpegState.handlers['end']?.();
     }),
   };
-  const ffmpeg = jest.fn(() => command) as unknown as {
+  const ffmpeg = jest.fn((): typeof command => command) as unknown as {
     (path: string): typeof command;
     ffprobe: jest.Mock;
     setFfmpegPath: jest.Mock;
     setFfprobePath: jest.Mock;
   };
   ffmpeg.ffprobe = jest.fn(
-    (_path: string, cb: (err: Error | null, data: unknown) => void) =>
-      cb(null, ffmpegState.probeData),
+    (_path: string, cb: (err: Error | null, data: unknown) => void): void => {
+      cb(null, ffmpegState.probeData);
+    },
   );
   ffmpeg.setFfmpegPath = jest.fn();
   ffmpeg.setFfprobePath = jest.fn();
@@ -38,17 +39,19 @@ jest.mock('fluent-ffmpeg', () => {
 });
 
 jest.mock('node:fs', () => ({
-  ...jest.requireActual('node:fs'),
-  createWriteStream: jest.fn(() => ({})),
+  ...jest.requireActual<typeof import('node:fs')>('node:fs'),
+  createWriteStream: jest.fn((): object => ({})),
 }));
 jest.mock('node:fs/promises', () => ({
-  ...jest.requireActual('node:fs/promises'),
+  ...jest.requireActual<typeof import('node:fs/promises')>('node:fs/promises'),
   mkdtemp: jest.fn().mockResolvedValue('/tmp/streamtube-test'),
   readFile: jest.fn().mockResolvedValue(Buffer.from('jpeg-bytes')),
   rm: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock('node:stream/promises', () => ({
-  ...jest.requireActual('node:stream/promises'),
+  ...jest.requireActual<typeof import('node:stream/promises')>(
+    'node:stream/promises',
+  ),
   pipeline: jest.fn().mockResolvedValue(undefined),
 }));
 
@@ -68,7 +71,11 @@ function makeConfig(): VideoConfig {
 
 interface Mocks {
   repo: { findOne: jest.Mock; save: jest.Mock };
-  storage: { buildThumbnailKey: jest.Mock; getPresignedDownloadUrl: jest.Mock; putObject: jest.Mock };
+  storage: {
+    buildThumbnailKey: jest.Mock;
+    getPresignedDownloadUrl: jest.Mock;
+    putObject: jest.Mock;
+  };
 }
 
 function build(): { service: VideoProcessingService; mocks: Mocks } {
@@ -78,9 +85,7 @@ function build(): { service: VideoProcessingService; mocks: Mocks } {
       save: jest.fn((v: Video) => Promise.resolve(v)),
     },
     storage: {
-      buildThumbnailKey: jest.fn(
-        (id: string) => `videos/${id}/thumbnail.jpg`,
-      ),
+      buildThumbnailKey: jest.fn((id: string) => `videos/${id}/thumbnail.jpg`),
       getPresignedDownloadUrl: jest
         .fn()
         .mockResolvedValue('http://minio:9000/presigned'),
